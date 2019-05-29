@@ -36,11 +36,14 @@ async def reminder(ctx, subcommand='help', *args):
     '''Set reminders for yourself, supports multiple formats.'''
     if (subcommand == 'help'):
         await ctx.send('Set a reminder for yourself with the '
-                       'following supported formats: \n    '
-                       '!reminder add [#] [days] [time] [message] \n    '
-                       '!reminder add [#] [weeks] [time] [message] \n    '
-                       '!reminder add [day of week] [time] [message] \n    '
+                       'following supported formats: \n'
+                       '```!reminder add [#] [days] [time] [message] \n'
+                       '!reminder add [#] [weeks] [time] [message] \n'
+                       '!reminder add [day of week] [time] [message] \n'
                        '!reminder add [month] [day] [time] [message] \n'
+                       '!reminder add [#] [hours] [message] \n'
+                       '!reminder add [#] [minutes] [message] \n'
+                       '!reminder add [#] [hours] [#] [minutes] [message]```'
                        'Time will default to 8:00 AM if not '
                        'specified.\n'
                        'Additionally, supports removal of previously '
@@ -53,11 +56,13 @@ async def reminder(ctx, subcommand='help', *args):
         try:
             if len(args) < 2:
                 raise SyntaxError('Too few arguments to add a reminder')
-            indicator = args[0]
             numberOfDays = 0
             splitArgsHere = 0
             now = datetime.today()
             indicator = args[0].lower()
+            hour = 8
+            minute = 0
+
             if 'day' in args[1]:
                 if (4 < len(args)) and 'week' in args[3]:
                     numberOfDays += int(args[2]) * 7
@@ -71,9 +76,28 @@ async def reminder(ctx, subcommand='help', *args):
                 numberOfDays += int(args[0]) * 7
                 splitArgsHere += 2
             elif 'hour' in args[1]:
-                pass #TODO
+                hour = now.hour + int(args[0])
+                minute = now.minute
+                splitArgsHere += 2
+                if (4 < len(args)) and 'min' in args[3]:
+                    minute += int(args[2])
+                    while (minute >= 60):
+                        minute -= 60
+                        hour += 1
+                    splitArgsHere += 2
+                while (hour >= 24):
+                    numberOfDays += 1
+                    hour -= 24
             elif 'min' in args[1]:
-                pass #TODO
+                minute = now.minute + int(args[0])
+                hour = now.hour
+                splitArgsHere += 2
+                while (minute >= 60):
+                    minute -= 60
+                    hour += 1
+                while (hour >= 24):
+                    numberOfDays += 1
+                    hour -= 24
             elif any(weekday in indicator for weekday in ['sun', 
                      'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
                 # case insensitive comparison
@@ -129,9 +153,7 @@ async def reminder(ctx, subcommand='help', *args):
                     addyear += 1
                 newdate = now.replace(year=now.year + addyear, month=newmonth, day=newday)
                 numberOfDays += math.ceil((newdate - now).days)
-            
-            hour = 8
-            minute = 0
+
             if ':' in args[splitArgsHere]:
                 hoursAndMins = args[splitArgsHere].split(':')
                 hour = int(hoursAndMins[0])
@@ -242,4 +264,4 @@ async def reminder(ctx, subcommand='help', *args):
         await ctx.send('Invalid subcommand! Valid subcommands are '
                        'add, remove, list, and help.')
 
-bot.run('') # Add bot token here to run the bot
+bot.run('NTc1ODI5NDg0OTE4NTM4MjUw.XNN6Mg.-hdzG-AlB-iCBOGA6bMWrQRAKlw') # Add bot token here to run the bot
