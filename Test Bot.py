@@ -14,6 +14,48 @@ from os.path import abspath
 
 bot = commands.Bot(command_prefix='!')
 
+async def send_reminder(seconds, authorID, channelID, message):
+    '''
+    Helper method for sending a reminder. Takes in an integer
+    number of seconds, the Discord ID of the person to send the
+    reminder to, the channel ID to send the reminder in,
+    and the reminder message.
+    '''
+    if seconds > 0:
+        await asyncio.sleep(seconds)
+    author = bot.get_user(authorID)
+    channel = bot.get_channel(channelID)
+    reminderFile = open('reminders.txt', 'r+')
+    newReminderLines = reminderFile.readlines()
+    reminderFile.close()
+    reminderFile = open('reminders.txt', 'w')
+    lineswritten = 0
+    overdueReminders = 0
+    for i in newReminderLines:
+        fullreminder = i.split(' ')
+        date = fullreminder[0]
+        time = fullreminder[1]
+        reminderdt = datetime(year=int(date[0:4]), month=int(date[5:7]), day=int(date[8:10]), hour=int(time[0:2]), minute=int(time[3:5]))
+        timediff = reminderdt - datetime.today()
+        messagetimecorrect = (abs(timediff.days*3600*24 + timediff.seconds) < 29)
+        overdueReminder = (timediff.days*3600*24 + timediff.seconds <= -29)
+        if not (message in i and (messagetimecorrect or overdueReminder)):
+            reminderFile.write(i)
+            lineswritten += 1
+        else:
+            if overdueReminder:
+                await channel.send('{0}, you have a late reminder: \n'.format(author.mention) +
+                       '```' + message + '```')
+                overdueReminders += 1
+    reminderFile.close()
+    # Check to skip reminder sending if it is deleted through !reminder remove
+    if lineswritten == len(newReminderLines):
+        return
+    elif overdueReminders + lineswritten == len(newReminderLines):
+        return
+    await channel.send('{0}, you have a reminder: \n'.format(author.mention) +
+                       '```' + message + '```')
+
 @bot.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(bot))
@@ -22,18 +64,35 @@ async def on_ready():
         os.chdir(os.path.dirname(abspath(getsourcefile(lambda:0))))
     reminderFile = open('reminders.txt', 'a')
     reminderFile.close()
-    # Setup reminder checking
-
-
     # Ensure that bot channel and category exist
     for botguild in bot.guilds:
         if not any('bot-reminders' in channelname.name for channelname in botguild.text_channels):
             botstuffcat = await botguild.create_category('bot-stuff')
             await botguild.create_text_channel('bot-reminders', category=botstuffcat)
+    # Setup reminder checking
+    reminderFile = open('reminders.txt', 'r')
+    activeReminder = reminderFile.readline()
+    reminderFile.close()
+    while activeReminder != '':
+        reminderargs = activeReminder.split(' ')
+        date = reminderargs[0]
+        time = reminderargs[1]
+        authorID = reminderargs[2]
+        channelID = reminderargs[3]
+        reminderMessage = ' '.join(reminderargs[4:])
+        timediff = datetime(year=int(date[0:4]), month=int(date[5:7]), day=int(date[8:10]), hour=int(time[0:2]), minute=int(time[3:5])) - datetime.today()
+        secondsToSleep = timediff.seconds + timediff.days*24*3600
+        await send_reminder(secondsToSleep, int(authorID), int(channelID), reminderMessage)
+        reminderFile = open('reminders.txt', 'r')
+        activeReminder = reminderFile.readline()
+        reminderFile.close()
 
 @bot.command()
 async def reminder(ctx, subcommand='help', *args):
-    '''Set reminders for yourself, supports multiple formats.'''
+    '''
+    Set reminders for yourself, supports multiple formats.
+    Type \'!reminder\' to see a list of supported command formats.
+    '''
     if (subcommand == 'help'):
         await ctx.send('Set a reminder for yourself with the '
                        'following supported formats: \n'
@@ -184,10 +243,21 @@ async def reminder(ctx, subcommand='help', *args):
                 if channel.name == 'bot-reminders':
                     channelID = channel.id
                     break
-            reminderFile = open('reminders.txt', 'a')
-            reminderFile.write(' '.join([str(reminderTime), str(authorID), str(channelID), message]) + '\n')
+            reminderFile = open('reminders.txt', 'r')
+            allReminders = reminderFile.readlines()
+            reminderFile.close()
+            newReminder = ' '.join([str(reminderTime), str(authorID), str(channelID), message]) + '\n'
+            allReminders.append(newReminder)
+            allReminders.sort()
+            reminderFile = open('reminders.txt', 'w')
+            for eachReminder in allReminders:
+                reminderFile.write(eachReminder)
             reminderFile.close()
             await ctx.send('Reminder set for ' + str(reminderTime))
+            if newReminder == allReminders[0]:
+                timediff = reminderTime - datetime.today()
+                secondsToSleep = timediff.seconds + timediff.days*24*3600
+                await send_reminder(secondsToSleep, authorID, channelID, message)
 
         except (IndexError, SyntaxError, TypeError, ValueError, commands.errors.UnexpectedQuoteError):
             await ctx.send('Invalid reminder format! '
@@ -224,14 +294,30 @@ async def reminder(ctx, subcommand='help', *args):
                 reminderFile = open('reminders.txt', 'r+')
                 newReminderLines = reminderFile.readlines()
                 reminderFile.seek(0)
+                resendRemindersNeeded = False
                 for i in newReminderLines:
-                    if not linetodelTime in i and not linetodelMessage in i:
+                    if not (linetodelTime in i and linetodelMessage in i):
                         reminderFile.write(i)
+                    else:
+                        if i == newReminderLines[0]:
+                            resendRemindersNeeded = True
                 reminderFile.truncate()
                 reminderFile.close()
                 await ctx.channel.send('Reminder #' + str(numtodel) + ': \n' +
                                     '```' + linetodel + '```' +
                                     'successfully removed!')
+                # When deleting first reminder on list,
+                # prepare to send out another reminder
+                if resendRemindersNeeded:
+                    newFirstReminder = newReminderLines[1].split(' ')
+                    date = newFirstReminder[0]
+                    time = newFirstReminder[1]
+                    authorID = newFirstReminder[2]
+                    channelID = newFirstReminder[3]
+                    newReminderMessage = ' '.join(newFirstReminder[4:])
+                    timediff = datetime(year=int(date[0:4]), month=int(date[5:7]), day=int(date[8:10]), hour=int(time[0:2]), minute=int(time[3:5])) - datetime.today()
+                    secondsToSleep = timediff.seconds + timediff.days*24*3600
+                    await send_reminder(secondsToSleep, int(authorID), int(channelID), newReminderMessage)
             except (asyncio.TimeoutError, ValueError, IndexError):
                 await ctx.channel.send('Invalid input, canceling reminder removal')
 
@@ -264,4 +350,4 @@ async def reminder(ctx, subcommand='help', *args):
         await ctx.send('Invalid subcommand! Valid subcommands are '
                        'add, remove, list, and help.')
 
-bot.run('NTc1ODI5NDg0OTE4NTM4MjUw.XNN6Mg.-hdzG-AlB-iCBOGA6bMWrQRAKlw') # Add bot token here to run the bot
+bot.run('bot-token') # Add bot token here to run the bot
