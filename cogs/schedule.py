@@ -36,9 +36,17 @@ class Schedule(commands.Cog):
                 if rewrite_file_needed:
                     json.dump(full_schedule, schedule_file, indent=4)
         
+        # Ensure the proper "scheduled" role exists
+        for guild in self.bot.guilds:
+            if not any(role.name == 'Scheduled by Bot' 
+                       for role in guild.roles):
+                await guild.create_role(name="Scheduled by Bot", 
+                                        mentionable=True)
+        
         self.update_scheduled_roles.start()
     
     @commands.command()
+    @commands.has_permissions(manage_roles=True)
     async def schedule(self, ctx, subcommand='help', *args):
         """Store scheduled availability and dynamically assign roles to users.
 
@@ -46,6 +54,7 @@ class Schedule(commands.Cog):
         entirely dependent on Discord users themselves. Implemented by storing 
         user scheduling information in a local JSON file.
         """
+
         if subcommand.lower() not in ('help', 'set', 'change', 
                                       'view', 'clear'):
             await ctx.send('Invalid subcommand! Valid subcommands are ' 
@@ -119,15 +128,15 @@ class Schedule(commands.Cog):
                                    'completely.')
                     return
 
-            new_user_schedule = {0 : [], 1 : [], 2 : [], 
-                                 3 : [], 4 : [], 5 : [],
-                                 6 : []}
+            new_user_schedule = {'0' : [], '1' : [], '2' : [], 
+                                 '3' : [], '4' : [], '5' : [],
+                                 '6' : []}
             
             # Parse user input
             try:
-                weekdays = {'sunday': 0, 'monday': 1, 'tuesday': 2, 
-                            'wednesday': 3, 'thursday': 4, 'friday': 5, 
-                            'saturday': 6}
+                weekdays = {'sunday': '6', 'monday': '0', 'tuesday': '1', 
+                            'wednesday': '2', 'thursday': '3', 'friday': '4', 
+                            'saturday': '5'}
                 
                 full_message = ((' ').join(args)).lower()
                 input_by_days = [day.strip() 
@@ -224,7 +233,7 @@ class Schedule(commands.Cog):
                     complete_day = [[datetime.datetime.strftime(time, "%H:%M")
                                      for time in shift]
                                      for shift in parsed_shift_datetimes]
-                    new_user_schedule[current_day].append(complete_day)
+                    new_user_schedule[current_day] = complete_day
             except ValueError:
                 await ctx.send('Invalid input format. Please try again! You '
                             'can type "!schedule" for more information on '
@@ -232,6 +241,7 @@ class Schedule(commands.Cog):
                 return
 
             full_schedule[guild_id][author_id] = new_user_schedule
+            self._full_schedule = full_schedule
             with open(f'{self._schedules_json_path}', 'w') as schedule_file:
                 json.dump(full_schedule, schedule_file, indent=4)
             await ctx.send('New availability schedule successfully set!')
@@ -248,16 +258,61 @@ class Schedule(commands.Cog):
             
             await ctx.send('TODO') # TODO
         elif (subcommand == 'clear'):
-            if len(args) == 0:
-                await ctx.send('Detailed help message in development! ')
-                return
-            
-            await ctx.send('TODO') # TODO
+            await ctx.send('Are you sure you want to **completely clear** '
+                           'your schedule? Type "yes" if you are sure.')
+            try:
+                def check(m):
+                    return (m.channel == ctx.message.channel
+                            and m.author == ctx.message.author)
+                reply = await self.bot.wait_for('message', timeout=60, 
+                                                check=check)
+                if reply.content == 'yes':
+                    if author_id in self._full_schedule[guild_id]:
+                        self._full_schedule[guild_id].pop(author_id)
+                        with open(f'{self._schedules_json_path}', 'w') as f:
+                            json.dump(self._full_schedule, f, indent=4)
+                        await ctx.send('Schedule successfully cleared!')
+                    else:
+                        await ctx.send('Did not find a schedule for you '
+                                       'on file, so it was already cleared!')
+                else:
+                    await ctx.send('Cancelling schedule clear.')
+                    return
+            except asyncio.TimeoutError:
+                await ctx.send('No input received. Cancelling '
+                               'schedule clear. Please try again.')
 
 
     @tasks.loop(minutes=1.0)
     async def update_scheduled_roles(self):
-        pass #TODO
+        today = datetime.datetime.now()
+        todays_time = today.strftime("%H:%M")
+        for guild_id in self._full_schedule:
+            for user_id in self._full_schedule[guild_id]:
+                try:
+                    guild = self.bot.get_guild(int(guild_id))
+                    member = guild.get_member(int(user_id))
+                    role = discord.utils.get(
+                                guild.roles, name='Scheduled by Bot')
+                    times = (self._full_schedule[guild_id][user_id]
+                                            [str(today.weekday())])
+                    remove_role = True
+                    has_role = any(member_role.name == 'Scheduled by Bot' 
+                                   for member_role in member.roles)
+                    for time in times:
+                        if ((time[0] < todays_time or time[0] == todays_time)
+                                and (todays_time < time[1] 
+                                     or todays_time == time[1])):
+                            if not has_role:
+                                await member.add_roles(role)
+                            remove_role = False
+                            break
+                    if remove_role:
+                        if has_role:
+                            await member.remove_roles(role)
+                except KeyError:
+                    pass
+
 
 def setup(bot):
     bot.add_cog(Schedule(bot))
