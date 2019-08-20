@@ -4,6 +4,7 @@ import os
 import json
 import asyncio
 import datetime
+import calendar
 
 class Schedule(commands.Cog):
 
@@ -72,16 +73,30 @@ class Schedule(commands.Cog):
                            'the name of subcommand you are using.')
             return
 
-        with open(f'{self._schedules_json_path}', 'r') as schedule_file:
-            full_schedule = json.load(schedule_file)
+        full_schedule = self._full_schedule
         author_id = str(ctx.author.id)
         guild_id = str(ctx.guild.id)
 
         if (subcommand == 'set'):
             if len(args) == 0:
-                await ctx.send('Detailed help message in development! '
-                               'In the meantime, here are some examples '
-                               'of supported syntax: \n'
+                await ctx.send('Set your schedule using this command! '
+                               'Creates a new schedule for the user if '
+                               'none already exist, or erases the old '
+                               'schedule entirely should the user confirm '
+                               'their intent. \n'
+                               'Supported syntax is of the form \n'
+                               '"!schedule set [weekday] [start time] - '
+                               '[end time], [other weekday] [start time] - '
+                               '[end time] and [start time] - [end time], '
+                               '..." \n'
+                               'where start and end times for a single '
+                               '"shift" are separated by a dash, '
+                               'different "shifts" in a day are separated '
+                               'by the "*and*" keyword, and different days '
+                               'are separated by a comma. '
+                               'This subcommand is also case-insensitive. \n'
+                               'Some examples of supported syntax are as '
+                               'follows: \n'
                                '```'
                                '!schedule set Monday 8 AM - 12 PM\n'
                                '!schedule set Monday 8:00 - 13:00\n'
@@ -252,11 +267,27 @@ class Schedule(commands.Cog):
             
             await ctx.send('TODO') #TODO
         elif (subcommand == 'view'):
-            if len(args) == 0:
-                await ctx.send('Detailed help message in development! ')
+            if author_id not in full_schedule[guild_id]:
+                await ctx.send('Did not find a schedule on file for you!')
                 return
             
-            await ctx.send('TODO') # TODO
+            embed = discord.Embed(title="Schedule for " 
+                                        + str(ctx.message.author) + ": ")
+            
+            user_schedule = full_schedule[guild_id][author_id]
+            for day in user_schedule:
+                if user_schedule[day]:
+                    field_name = calendar.day_name[int(day)] + ': '
+                    field_value = ''
+                    newline = ''
+                    for shift in user_schedule[day]:
+                        field_value += newline
+                        field_value += shift[0] + ' - ' + shift[1]
+                        newline = "\n"
+                    embed.add_field(name=field_name, value=field_value, 
+                                    inline=False)
+            
+            await ctx.send(embed=embed)
         elif (subcommand == 'clear'):
             await ctx.send('Are you sure you want to **completely clear** '
                            'your schedule? Type "yes" if you are sure.')
